@@ -1,0 +1,12 @@
+{
+  "name": "ai-shorts-generator-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install-deps": "npm install && npm install --prefix server && npm install --prefix client",
+    "start": "npx concurrently \"npm run dev --prefix client\" \"npm start --prefix server\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

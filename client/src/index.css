@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f3f4f6;
+  color: #1f2937;
+}
+
+/* Custom raw terminal style scrollbar */
+.terminal-logs::-webkit-scrollbar {
+  width: 6px;
+}
+.terminal-logs::-webkit-scrollbar-track {
+  background: #111827;
+}
+.terminal-logs::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 3px;
+}
