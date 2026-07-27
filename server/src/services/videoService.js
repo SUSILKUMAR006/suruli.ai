@@ -6,9 +6,10 @@ const fs = require('fs');
  * Utility to extract YouTube Video ID from URL
  */
 function getYoutubeId(url) {
-  const regExp = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+  if (!url) return null;
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|shorts\/|&v=)([^#\&\?]*).*/;
   const match = url.match(regExp);
-  return (match && match[1]) ? match[1] : null;
+  return (match && match[2].length === 11) ? match[2] : null;
 }
 
 /**
@@ -65,16 +66,23 @@ async function downloadVideo(url, videoId, onLog) {
 
   onLog(`[PROCESS] Downloading video from URL: ${url}`);
   
-  // Choose best mp4 compatible quality and merge
-  const args = [
-    '-m', 'yt_dlp',
-    '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+  // Prioritize English audio track, falling back to m4a and other tracks, inside mp4 container
+  const dlArgs = [
+    '-f', 'bestvideo[ext=mp4]+(bestaudio[language*=en]/bestaudio[ext=m4a]/bestaudio)/best[ext=mp4]/best',
     '--merge-output-format', 'mp4',
     '-o', videoPath,
     url
   ];
 
-  await spawnPromise('python', args, {}, onLog);
+  try {
+    onLog(`[INFO] Attempting download using global yt-dlp CLI...`);
+    await spawnPromise('yt-dlp', dlArgs, {}, onLog);
+  } catch (err) {
+    onLog(`[WARNING] Global yt-dlp failed or not found: ${err.message}. Retrying with python -m yt_dlp...`);
+    const pyArgs = ['-m', 'yt_dlp', ...dlArgs];
+    await spawnPromise('python', pyArgs, {}, onLog);
+  }
+
   onLog(`[SUCCESS] Download completed. Saved to ${videoPath}`);
   return videoPath;
 }
@@ -205,10 +213,38 @@ async function processClip(videoId, clipId, start, end, onLog) {
   return `${clipId}.mp4`;
 }
 
+/**
+ * Queries video metadata including width, height, and duration using ffprobe
+ */
+function getVideoMetadata(videoId) {
+  const videoPath = path.join(__dirname, '../../../videos', `${videoId}.mp4`);
+  return new Promise((resolve, reject) => {
+    const cmd = `ffprobe -v error -show_entries format=duration -show_entries stream=width,height -of json "${videoPath}"`;
+    exec(cmd, (err, stdout, stderr) => {
+      if (err) {
+        return reject(new Error(`Failed to query metadata: ${stderr || err.message}`));
+      }
+      try {
+        const data = JSON.parse(stdout);
+        const stream = data.streams && data.streams[0] ? data.streams[0] : {};
+        const format = data.format ? data.format : {};
+        resolve({
+          width: stream.width || 0,
+          height: stream.height || 0,
+          duration: format.duration ? parseFloat(format.duration) : 0
+        });
+      } catch (e) {
+        reject(new Error(`Error parsing ffprobe output: ${e.message}`));
+      }
+    });
+  });
+}
+
 module.exports = {
   getYoutubeId,
   downloadVideo,
   extractAudio,
   getVideoDimensions,
+  getVideoMetadata,
   processClip
 };

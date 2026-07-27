@@ -4,11 +4,11 @@ const fs = require('fs');
 /**
  * Sends transcript text to the Groq LLM API and requests a list of engaging clips
  */
-async function selectClips(transcriptText, clipLength, numberOfShorts, onLog) {
+async function selectClips(transcriptText, clipLength, numberOfShorts, onLog, modelName) {
   onLog(`[PROCESS] Contacting Groq LLM for transcript analysis...`);
 
   const apiKey = process.env.GROQ_API_KEY;
-  const modelName = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+  const finalModelName = modelName || process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 
   if (!apiKey) {
     throw new Error('GROQ_API_KEY is not defined in the environment variables.');
@@ -28,6 +28,7 @@ Schema:
       "end": 42.0,
       "reason": "Why this segment is engaging (e.g., strong hook, joke, surprising fact)",
       "title": "A short, catchy, click-worthy title for the Short",
+      "hook": "An attention-grabbing visual hook phrase (3-6 words) to display at the start of the video",
       "caption": "An engaging description/caption with popular hashtags (e.g. #shorts, #trending)"
     }
   ]
@@ -39,22 +40,41 @@ Strict Rules:
 3. Every clip must start with a strong hook and avoid long introductions, filler words, or awkward pauses.
 4. Ensure selected segments are continuous (do not jump between different non-contiguous parts of the video).
 5. Choose segments with high emotion, surprise, humor, conflict, valuable insights, or compelling storytelling.
-6. Return only the JSON object. Do not include any explanations before or after the JSON.`;
+6. Ensure that the clip start and end times align with the beginning and end of a complete sentence or thought, so that the clip does not cut off abruptly.
+7. Return only the JSON object. Do not include any explanations before or after the JSON.`;
+
+  // Slice transcript to first 15 minutes (900 seconds) to fit within LLM token/rate limits
+  const lines = transcriptText.split('\n');
+  const filteredLines = [];
+  for (const line of lines) {
+    const match = line.match(/^\[(\d+(?:\.\d+)?)/);
+    if (match) {
+      const startSec = parseFloat(match[1]);
+      if (startSec < 900) {
+        filteredLines.push(line);
+      } else {
+        break; // Stop including lines past 15 minutes
+      }
+    } else {
+      filteredLines.push(line);
+    }
+  }
+  const slicedTranscriptText = filteredLines.join('\n');
 
   const userPrompt = `Analyze the transcript and identify up to ${numberOfShorts} of the most engaging clips.
 Each clip must be between 20 and ${clipLength} seconds long.
 
 Transcript:
-${transcriptText}`;
+${slicedTranscriptText}`;
 
-  onLog(`[INFO] Sending prompt to Groq model: ${modelName}`);
+  onLog(`[INFO] Sending prompt to Groq model: ${finalModelName}`);
 
   const chatCompletion = await groq.chat.completions.create({
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt }
     ],
-    model: modelName,
+    model: finalModelName,
     // Enable JSON Mode to guarantee valid JSON response
     response_format: { type: 'json_object' },
     temperature: 0.3

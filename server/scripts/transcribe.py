@@ -31,8 +31,8 @@ def transcribe(audio_path, output_json, output_txt, model_name="base"):
                 start = segment.get('start', 0.0)
                 end = segment.get('end', 0.0)
                 text = segment.get('text', '').strip()
-                # Format: [start_seconds - end_seconds] Text
-                f.write(f"[{start:.2f} - {end:.2f}] {text}\n")
+                # Format: [start_seconds-end_seconds] Text (using integers to save tokens)
+                f.write(f"[{int(start)}-{int(end)}] {text}\n")
                 
         print("Whisper transcription process completed successfully.")
         return True
