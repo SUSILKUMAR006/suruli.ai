@@ -59,6 +59,18 @@ function buildCaptionPositionOverride(options = {}) {
   return `\\an5\\pos(${Math.round(x)},${Math.round(y)})`;
 }
 
+function cleanWordText(word) {
+  return String(word || '')
+    .trim()
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"']/g, '')
+    .toUpperCase();
+}
+function escapeAssText(text) {
+  return String(text || '')
+    .replace(/\r/g, '')
+    .replace(/\n/g, ' ')
+    .trim();
+}
 /**
  * Generates ASS file content for a specific clip range from Whisper transcription JSON.
  * Groups words into short, timing-aware blocks and highlights the active word.
@@ -116,8 +128,14 @@ function generateAssForClip(whisperData, clipStart, clipEnd, hookText, options =
     }
   }
 
-  // Filter words that fit within the clip range
-  let clipWords = words.filter(w => w.start >= clipStart && w.end <= clipEnd);
+  // Filter words that fit within the clip range while keeping boundary words that overlap the clip.
+  let clipWords = words
+    .map((word) => ({
+      ...word,
+      start: Math.max(word.start, clipStart),
+      end: Math.min(word.end, clipEnd)
+    }))
+    .filter((word) => word.end > word.start && word.end > clipStart && word.start < clipEnd);
 
   // Fallback: if no word timestamps, estimate word timings from segment durations
   if (clipWords.length === 0) {
@@ -152,7 +170,7 @@ function generateAssForClip(whisperData, clipStart, clipEnd, hookText, options =
     let currentGroupStart = null;
     let currentGroupEnd = null;
     const MAX_GROUP_WORDS = 3;
-    const MAX_SILENCE = 0.55;
+    const MAX_SILENCE = 0.6;
     const MAX_GROUP_DURATION = 1.35;
 
     const flushGroup = () => {
@@ -192,15 +210,20 @@ function generateAssForClip(whisperData, clipStart, clipEnd, hookText, options =
       for (let i = 0; i < group.length; i++) {
         const activeWord = group[i];
         
-        // Start time of the highlight frame
+        const clipDuration = Math.max(0.01, clipEnd - clipStart);
         const startSec = Math.max(0, activeWord.start - clipStart);
-        
-        // End time of the highlight frame: next word's start, or this word's end if last
-        let endSec;
-        if (i < group.length - 1) {
-          endSec = Math.max(startSec + 0.05, group[i + 1].start - clipStart);
-        } else {
-          endSec = Math.max(startSec + 0.1, activeWord.end - clipStart);
+        const wordDuration = Math.max(0.16, Math.min(0.3, activeWord.end - activeWord.start));
+        const nextStartSec = i < group.length - 1 ? group[i + 1].start - clipStart : clipDuration;
+        const fallbackEndSec = Math.min(clipDuration, startSec + wordDuration + 0.08);
+
+        // Keep the highlight visible long enough for the pop animation without making the event too short.
+        let endSec = Math.max(startSec + 0.16, Math.min(nextStartSec - 0.01, fallbackEndSec));
+        if (i === group.length - 1) {
+          endSec = Math.max(endSec, Math.min(clipDuration, startSec + wordDuration + 0.16));
+        }
+
+        if (endSec <= startSec) {
+          endSec = Math.min(clipDuration, startSec + 0.16);
         }
 
         const startTimeStr = formatAssTime(startSec);
@@ -210,7 +233,7 @@ function generateAssForClip(whisperData, clipStart, clipEnd, hookText, options =
         const lineParts = [];
         for (let j = 0; j < group.length; j++) {
           const w = group[j];
-          const wordText = w.word.trim().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"']/g, "").toUpperCase();
+          const wordText = cleanWordText(w.word);
           if (!wordText) continue;
 
           if (j === i) {
@@ -222,9 +245,12 @@ function generateAssForClip(whisperData, clipStart, clipEnd, hookText, options =
           }
         }
 
-        const lineText = lineParts.join(' ');
-        if (lineText.trim()) {
-          assLines.push(`Dialogue: 0,${startTimeStr},${endTimeStr},Default,,0,0,0,,${lineText}`);
+        const lineText = escapeAssText(lineParts.join(' '));
+        if (lineText) {
+          const normalizedText = lineText.replace(/\s+/g, ' ').trim();
+          if (normalizedText && startTimeStr !== endTimeStr) {
+            assLines.push(`Dialogue: 0,${startTimeStr},${endTimeStr},Default,,0,0,0,,${normalizedText}`);
+          }
         }
       }
     }
